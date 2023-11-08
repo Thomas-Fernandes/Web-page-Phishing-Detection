@@ -172,3 +172,5 @@ En analysant les données, j'observe que la précision la plus élevée est obte
 Il est également important de noter les écarts-types des précisions (AccuracySD) et des scores Kappa (KappaSD), qui fournissent une indication de la variabilité de la performance du modèle à travers les différentes itérations de la validation croisée. Des écarts-types plus faibles sont préférables car ils impliquent une performance plus constante du modèle.
 
 ### Régression logistique
+
+Yassine
