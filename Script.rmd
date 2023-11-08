@@ -112,6 +112,7 @@ DTest <- df[-indxTrain, ]
 cat("Nombre d'observations dans l'ensemble d'entraînement:", nrow(DTrain), "\n")
 cat("Nombre d'observations dans l'ensemble de test:", nrow(DTest), "\n")
 ```
+Test
 
 ### K-NN
 
@@ -145,7 +146,7 @@ D'après les résultats obtenus, le modèle a une précision d'environ 84.17%, c
 
 Dans cette section de votre analyse, vous avez effectué une recherche du nombre optimal de voisins k pour le modèle des k-plus proches voisins (K-NN) à l'aide de la validation croisée 10-fold. Cela implique de diviser l'ensemble de données d'entraînement en 10 parties, d'utiliser 9 d'entre elles pour l'entraînement et une pour la validation, et de répéter ce processus 10 fois avec des parties différentes à chaque fois pour la validation.
 
-```{r}
+```{r, warning=FALSE}
 # Recherche du meilleur k
 ctrl <- trainControl(method = "cv", number = 10) # 10-fold cross-validation
 
