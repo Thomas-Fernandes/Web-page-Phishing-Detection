@@ -29,6 +29,7 @@ library(caret)
 
 df <- read_csv("dataset_phishing.csv", show_col_types = FALSE)
 df <- df[,-1]
+df$status <- as.factor(df$status)
 ```
 
 ## {.tabset .tabset-pills}
@@ -112,16 +113,20 @@ DTest <- df[-indxTrain, ]
 cat("Nombre d'observations dans l'ensemble d'entraînement:", nrow(DTrain), "\n")
 cat("Nombre d'observations dans l'ensemble de test:", nrow(DTest), "\n")
 ```
-Test
 
 ### K-NN
 
 # 1. prédictions
 
 ```{r}
+set.seed(123)
 ctrl <- trainControl(method = "none")
-set.seed(123) # Pour la reproductibilité
-fit.knn <- train(status ~ ., data = DTrain, method = "knn", tuneGrid = data.frame(k = 5), trControl = ctrl)
+fit.knn <- train(status ~ .,
+                 data = DTrain,
+                 method = "knn",
+                 tuneGrid = data.frame(k = 5),
+                 trControl = ctrl,
+                 na.action = na.omit)
 predictions <- predict(fit.knn, newdata = DTest)
 ```
 
@@ -140,25 +145,22 @@ errorRate <- 1 - confusionMatrix$overall['Accuracy']
 print(errorRate)
 
 ```
-D'après les résultats obtenus, le modèle a une précision d'environ 84.17%, ce qui signifie qu'il a correctement prédit 84.17% des URL comme étant légitimes ou de phishing. La matrice montre également les répartitions spécifiques des vrais positifs, vrais négatifs, faux positifs et faux négatifs. Plus précisément, le modèle a correctement identifié 1,187 URL légitimes et 1,217 URL de phishing, tandis qu'il a incorrectement classé 211 URL légitimes comme phishing et 241 URL de phishing comme légitimes. Le taux d'erreur de 15.82% reflète la proportion de prédictions incorrectes par rapport au total des prédictions.
+D'après les résultats obtenus, le modèle a une précision d'environ 84.17%, ce qui signifie qu'il a correctement prédit 84.17% des URL comme étant légitimes ou de phishing. La matrice montre également les répartitions spécifiques des vrais positifs, vrais négatifs, faux positifs et faux négatifs. Plus précisément, le modèle a correctement identifié 1171 URL légitimes (Vrais positifs) et 1200 URL de phishing (vrais négatifs), tandis qu'il a incorrectement classé 257 URL légitimes comme phishing (Faux négatifs) et 228 URL de phishing comme légitimes (faux positifs). Le taux d'erreur de 15.82% reflète la proportion de prédictions incorrectes par rapport au total des prédictions.
 
 # 3. Choix du K
 
 Dans cette section de votre analyse, vous avez effectué une recherche du nombre optimal de voisins k pour le modèle des k-plus proches voisins (K-NN) à l'aide de la validation croisée 10-fold. Cela implique de diviser l'ensemble de données d'entraînement en 10 parties, d'utiliser 9 d'entre elles pour l'entraînement et une pour la validation, et de répéter ce processus 10 fois avec des parties différentes à chaque fois pour la validation.
 
 ```{r, warning=FALSE}
-# Recherche du meilleur k
-ctrl <- trainControl(method = "cv", number = 10) # 10-fold cross-validation
+ctrl <- trainControl(method = "cv", number = 10)
 
-# Entraînement du modèle avec une recherche de différents k
-knnFit <- train(status ~ ., data = DTrain, method = "knn", trControl = ctrl, tuneLength = 20, preProcess = c("center", "scale"))
+knnFit <- train(status ~ ., data = DTrain, method = "knn", trControl = ctrl, tuneLength = 20, preProcess = c("center", "scale"),
+                na.action = na.omit)
 
-# Visualisation des résultats
 plot(knnFit)
 print(knnFit$results)
 print(knnFit$bestTune)
 
-# Estimation de l'erreur de prédiction avec le meilleur k sur les données de test
 bestK <- knnFit$bestTune$k
 predictionsBestK <- predict(knnFit, newdata = DTest)
 confusionMatrixBestK <- confusionMatrix(predictionsBestK, DTest$status)
