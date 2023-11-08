@@ -135,7 +135,6 @@ predictions <- predict(fit.knn, newdata = DTest)
 Dans cette partie de l'analyse, nous évaluons la performance du modèle des k-plus proches voisins (K-NN) que nous avons entraîné pour la détection de sites de phishing. L'utilisation d'une matrice de confusion nous permet de comparer les prédictions du modèle par rapport aux valeurs réelles. La matrice de confusion est un outil puissant pour mesurer la précision, la sensibilité, la spécificité et d'autres métriques importantes de la performance du modèle.
 
 ```{r}
-# Matrice de confusion
 confusionMatrix <- confusionMatrix(predictions, DTest$status)
 
 print(confusionMatrix$table)
@@ -149,12 +148,17 @@ D'après les résultats obtenus, le modèle a une précision d'environ 84.17%, c
 
 # 3. Choix du K
 
-Dans cette section de votre analyse, vous avez effectué une recherche du nombre optimal de voisins k pour le modèle des k-plus proches voisins (K-NN) à l'aide de la validation croisée 10-fold. Cela implique de diviser l'ensemble de données d'entraînement en 10 parties, d'utiliser 9 d'entre elles pour l'entraînement et une pour la validation, et de répéter ce processus 10 fois avec des parties différentes à chaque fois pour la validation.
+Pour choisir le nombre optimal de voisins k pour notre modèle, nous avons utilisé la validation-croisée sous 10 sous-échantillons. Cela implique de diviser l'ensemble de données d'entraînement en 10 parties, d'utiliser 9 d'entre elles pour l'entraînement et une pour la validation, et de répéter ce processus 10 fois avec des parties différentes à chaque fois pour la validation.
 
 ```{r, warning=FALSE}
 ctrl <- trainControl(method = "cv", number = 10)
 
-knnFit <- train(status ~ ., data = DTrain, method = "knn", trControl = ctrl, tuneLength = 20, preProcess = c("center", "scale"),
+knnFit <- train(status ~ .,
+                data = DTrain,
+                method = "knn",
+                trControl = ctrl,
+                tuneLength = 40,
+                preProcess = c("center", "scale"),
                 na.action = na.omit)
 
 plot(knnFit)
