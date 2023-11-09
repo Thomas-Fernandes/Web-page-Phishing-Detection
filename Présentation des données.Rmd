@@ -1,0 +1,85 @@
+---
+title: "Présentation des données"
+author: "Thomas Fernandes"
+date: "2023-11-09"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Présenation des données
+
+
+```{r, include=FALSE, warning=FALSE}
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(corrplot)
+library(ggcorrplot)
+library(caret)
+library(tidyr)
+
+df <- read_csv("dataset_phishing.csv", show_col_types = FALSE)
+df <- df[,-1]
+df_data <- df
+```
+
+
+## 1. 
+
+```{r}
+df_data$target <- as.integer(df_data$status == 'legitimate')
+df_data <- df_data[, !names(df_data) %in% c('status')]
+```
+
+```{r}
+tmp <- data.frame(missing_val = colSums(is.na(df_data)))
+tmp <- tmp[tmp$missing_val != 0, ]
+
+likely_cat <- vector("logical", length = ncol(df_data) - 1)
+for (i in 2:ncol(df_data)) {
+  likely_cat[[i]] <- (length(unique(df_data[[i]])) / sum(!is.na(df_data[[i]]))) < 0.002
+}
+
+num_cols <- character()
+cat_cols <- character()
+
+for (i in 1:length(likely_cat)) {
+  if (!likely_cat[[i]]) {
+    num_cols <- c(num_cols, names(df_data)[i])
+  } else {
+    cat_cols <- c(cat_cols, names(df_data)[i])
+  }
+}
+```
+
+```{r}
+corr <- cor(df_data[num_cols])
+
+ggcorrplot(
+  corr,
+  hc.order = TRUE,
+  type = "full",
+  outline.color = "white",
+  ggtheme = ggplot2::theme_gray,
+  colors = c("#6D9EC1", "white", "#E46726"),
+  show.diag = TRUE,
+  tl.cex = 10
+)
+```
+
+
+```{r}
+df_distr <- df_data %>%
+  group_by(target) %>%
+  summarise(across(num_cols, mean)) %>%
+  pivot_longer(cols = -target, names_to = "feature", values_to = "value")
+
+ggplot(df_distr, aes(x = feature, y = value, fill = factor(target))) +
+  geom_bar(stat = "identity", position = "dodge") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  labs(x = "Numerical Features", y = "Average Values", title = "Distribution of Average values across Target")
+```
+
