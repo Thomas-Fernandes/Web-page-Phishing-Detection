@@ -50,9 +50,6 @@ Le jeu de données est équilibré, composé à 50 % d'URL de phishing et à 50 
 
 #### 1. Visualisation du jeu de données
 
-```{r}
-head(df)
-```
 #### 2. Distribution des classes
 
 ```{r}
@@ -151,7 +148,7 @@ D'après les résultats obtenus, le modèle a une précision d'environ 84.17%, c
 Pour choisir le nombre optimal de voisins k pour notre modèle, nous avons utilisé la validation-croisée sous 10 sous-échantillons. Cela implique de diviser l'ensemble de données d'entraînement en 10 parties, d'utiliser 9 d'entre elles pour l'entraînement et une pour la validation, et de répéter ce processus 10 fois avec des parties différentes à chaque fois pour la validation.
 
 ```{r, warning=FALSE}
-ctrl <- trainControl(method = "cv", number = 10)
+ctrl <- trainControl(method = "cv", number = 10, fix = 4, initial = 5)
 
 knnFit <- train(status ~ .,
                 data = DTrain,
