@@ -1,0 +1,405 @@
+---
+title: "Web page Phishing Detection project"
+output: 
+  html_document:
+    code_folding: show
+    theme:
+      bg: "#202123"
+      fg: "#B8BCC2"
+      primary: "#EA80FC"
+      base_font:
+        google: Prompt
+      heading_font:
+        google: Proza Libre
+      version: 3
+---
+
+```{r setup, include=FALSE}
+if (requireNamespace("thematic")) 
+  thematic::thematic_rmd(font = "auto")
+```
+
+```{r, include=FALSE, warning=FALSE}
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(corrplot)
+library(ggcorrplot)
+library(caret)
+library(pROC)
+library(plotROC)
+library(MASS)
+library(class)
+
+df <- read_csv("dataset_phishing.csv", show_col_types = FALSE)
+df <- df[,-1]
+```
+
+## {.tabset .tabset-pills}
+
+### Présentation des données
+
+Le phishing est une méthode de cyberfraude courante et efficace, exploitée par les cybercriminels pour dérober des informations personnelles et financières. Avec l'augmentation de notre dépendance à l'internet pour nos activités quotidiennes, les attaques de phishing sont devenues plus sophistiquées et difficiles à identifier. Une étude d'Intel a révélé que 97 % des experts en sécurité échouent à distinguer les courriels de phishing des courriels authentiques.
+
+Contenu du Jeu de Données
+
+Le jeu de données fourni contient 11 430 URL, chacune décrite par 87 caractéristiques distinctes. Ces données sont conçues pour servir de référence aux systèmes de détection de phishing basés sur l'apprentissage automatique. Les caractéristiques sont divisées en trois classes :
+
+- 56 basées sur la structure et la syntaxe des URL,
+- 24 extraites du contenu des pages web correspondantes,
+- 7 obtenues par des requêtes auprès de services externes.
+
+Le jeu de données est équilibré, composé à 50 % d'URL de phishing et à 50 % d'URL légitimes, ce qui est idéal pour l'entraînement de modèles de classification.
+
+#### 1. Visualisation du jeu de données
+
+```{r}
+head(df)
+```
+#### 2. Distribution des classes
+
+```{r}
+df$status <- as.factor(df$status)
+ggplot(df, aes(x=status, fill=status)) +
+  geom_bar() +
+  labs(x="Classe", y="Nombre d'Observations", fill="Statut") +
+  ggtitle("Distribution des Classes de Phishing vs Légitimes")
+```
+#### 3. Distribution des caractéristiques
+
+```{r}
+# Histogramme pour 'length_url'
+ggplot(df, aes(x=length_url)) +
+  geom_histogram(bins=30, fill="blue", alpha=0.7) +
+  labs(x="Longueur de l'URL", y="Fréquence") +
+  ggtitle("Distribution de la Longueur des URL") +
+  theme_minimal()
+
+# Boîte à moustaches pour 'length_url'
+ggplot(df, aes(y=length_url, x=status, fill=status)) +
+  geom_boxplot() +
+  labs(x="Statut", y="Longueur de l'URL", fill="Statut") +
+  ggtitle("Boîte à Moustaches de la Longueur des URL par Statut") +
+  theme_minimal()
+
+# Histogramme pour 'nb_hyphens'
+ggplot(df, aes(x=nb_hyphens)) +
+  geom_histogram(bins=30, fill="green", alpha=0.7) +
+  labs(x="Nombre de Tirets", y="Fréquence") +
+  ggtitle("Distribution du Nombre de Tirets dans les URL") +
+  theme_minimal()
+
+# Histogramme pour 'ratio_digits_url'
+ggplot(df, aes(x=ratio_digits_url)) +
+  geom_histogram(bins=30, fill="red", alpha=0.7) +
+  labs(x="Ratio de Chiffres dans l'URL", y="Fréquence") +
+  ggtitle("Distribution du Ratio de Chiffres dans les URL") +
+  theme_minimal()
+
+```
+#### 4. Corrélation des caractéristiques
+
+```{r}
+numeric_columns <- sapply(df, is.numeric)
+cor_matrix <- cor(df[, numeric_columns], use = "complete.obs")
+corrplot(cor_matrix, method = "circle", tl.cex = 0.6, cl.cex = 0.6)
+```
+
+
+### Préparation des données
+
+```{r}
+indxTrain <- createDataPartition(df$status, p = 0.75, list = FALSE)
+DTrain <- df[indxTrain, ]
+DTest <- df[-indxTrain, ]
+
+cat("Nombre d'observations dans l'ensemble d'entraînement:", nrow(DTrain), "\n")
+cat("Nombre d'observations dans l'ensemble de test:", nrow(DTest), "\n")
+```
+Test
+
+### K-NN
+
+# 1. prédictions
+
+```{r}
+ctrl <- trainControl(method = "none")
+set.seed(123) # Pour la reproductibilité
+fit.knn <- train(status ~ ., data = DTrain, method = "knn", tuneGrid = data.frame(k = 5), trControl = ctrl)
+predictions <- predict(fit.knn, newdata = DTest)
+```
+
+# 2. évaluation du modèle
+
+Dans cette partie de l'analyse, nous évaluons la performance du modèle des k-plus proches voisins (K-NN) que nous avons entraîné pour la détection de sites de phishing. L'utilisation d'une matrice de confusion nous permet de comparer les prédictions du modèle par rapport aux valeurs réelles. La matrice de confusion est un outil puissant pour mesurer la précision, la sensibilité, la spécificité et d'autres métriques importantes de la performance du modèle.
+
+```{r}
+# Matrice de confusion
+confusionMatrix <- confusionMatrix(predictions, DTest$status)
+
+print(confusionMatrix$table)
+print(confusionMatrix$overall['Accuracy'])
+
+errorRate <- 1 - confusionMatrix$overall['Accuracy']
+print(errorRate)
+
+```
+D'après les résultats obtenus, le modèle a une précision d'environ 84.17%, ce qui signifie qu'il a correctement prédit 84.17% des URL comme étant légitimes ou de phishing. La matrice montre également les répartitions spécifiques des vrais positifs, vrais négatifs, faux positifs et faux négatifs. Plus précisément, le modèle a correctement identifié 1,187 URL légitimes et 1,217 URL de phishing, tandis qu'il a incorrectement classé 211 URL légitimes comme phishing et 241 URL de phishing comme légitimes. Le taux d'erreur de 15.82% reflète la proportion de prédictions incorrectes par rapport au total des prédictions.
+
+# 3. Choix du K
+
+Dans cette section de votre analyse, vous avez effectué une recherche du nombre optimal de voisins k pour le modèle des k-plus proches voisins (K-NN) à l'aide de la validation croisée 10-fold. Cela implique de diviser l'ensemble de données d'entraînement en 10 parties, d'utiliser 9 d'entre elles pour l'entraînement et une pour la validation, et de répéter ce processus 10 fois avec des parties différentes à chaque fois pour la validation.
+
+```{r, warning=FALSE}
+# Recherche du meilleur k
+ctrl <- trainControl(method = "cv", number = 10) # 10-fold cross-validation
+
+# Entraînement du modèle avec une recherche de différents k
+knnFit <- train(status ~ ., data = DTrain, method = "knn", trControl = ctrl, tuneLength = 20, preProcess = c("center", "scale"))
+
+# Visualisation des résultats
+plot(knnFit)
+print(knnFit$results)
+print(knnFit$bestTune)
+
+# Estimation de l'erreur de prédiction avec le meilleur k sur les données de test
+bestK <- knnFit$bestTune$k
+predictionsBestK <- predict(knnFit, newdata = DTest)
+confusionMatrixBestK <- confusionMatrix(predictionsBestK, DTest$status)
+errorRateBestK <- 1 - confusionMatrixBestK$overall['Accuracy']
+print(errorRateBestK)
+```
+Le graphique généré illustre comment la précision de la validation croisée varie en fonction du nombre de voisins k. D'après la visualisation, il semble que la précision augmente lorsque le nombre de voisins est faible et diminue après avoir atteint un pic. Cela suggère qu'un nombre plus réduit de voisins aide le modèle à mieux capturer les nuances des données sans tomber dans le surajustement, où le modèle est trop spécifique aux données d'entraînement et ne généralise pas bien aux nouvelles données.
+
+En analysant les données, j'observe que la précision la plus élevée est obtenue avec k=5. Cela suggère que le modèle classifie les données avec le plus de précision lorsqu'il considère les 5 voisins les plus proches. Ensuite, bien que la précision diminue légèrement avec k=7, elle reste relativement élevée pour k allant jusqu'à 13, après quoi la précision commence à diminuer de manière plus significative. Cela peut indiquer que des valeurs de k plus faibles sont préférables pour ce dataset spécifique, mais qu'il existe une marge avant que l'augmentation de k n'entraîne un sous-ajustement notable.
+
+Il est également important de noter les écarts-types des précisions (AccuracySD) et des scores Kappa (KappaSD), qui fournissent une indication de la variabilité de la performance du modèle à travers les différentes itérations de la validation croisée. Des écarts-types plus faibles sont préférables car ils impliquent une performance plus constante du modèle.
+
+### Régression logistique
+
+
+#### 1. Entraînement du modèle de régression logistique
+
+```{r}
+set.seed(123)
+fit.logit <- glm(status ~ ., data = DTrain, family = "binomial")
+summary(fit.logit)
+```
+#### 2. Évaluation des performances du modèle
+
+```{r}
+# Prédictions de probabilités
+probs <- predict(fit.logit, newdata = DTest, type = "response")
+
+# Convertir les probabilités en classe binaire en utilisant 0.5 comme seuil
+predictionsLogit <- ifelse(probs > 0.5, "phishing", "non_phishing")
+predictionsLogit <- as.factor(predictionsLogit)
+
+# Matrice de confusion
+confusionMatrixLogit <- confusionMatrix(predictionsLogit, DTest$status)
+
+print(confusionMatrixLogit$table)
+print(confusionMatrixLogit$overall['Accuracy'])
+
+errorRateLogit <- 1 - confusionMatrixLogit$overall['Accuracy']
+print(errorRateLogit)
+```
+#### 3. ROC Curve et AUC
+
+```{r}
+rocCurve <- roc(DTest$status, probs)
+plot(rocCurve, main = "ROC Curve pour la régression logistique")
+auc(rocCurve)
+```
+#### 4. Représentez graphiquement les variables explicatives par des boîtes à moustaches
+
+```{r}
+melted_data <- melt(DTrain, id.vars = "status")
+ggplot(data = melted_data, aes(x = variable, y = value)) +
+  geom_boxplot() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) # Pour une meilleure visibilité
+
+# Boîtes à moustaches pour deux variables spécifiques
+ggplot(data = DTrain, aes(x = status, y = you, fill = status)) + geom_boxplot()
+ggplot(data = DTrain, aes(x = status, y = credit, fill = status)) + geom_boxplot()
+
+# Analyse
+## (a) Vérification si les variables explicatives ont le même ordre de grandeur
+scales <- sapply(DTrain[,-which(names(DTrain) == "status")], function(x) c(mean = mean(x), sd = sd(x)))
+print(scales)
+
+
+# Calculez la distribution des spams dans les données
+spam_distribution <- prop.table(table(DTrain$status))
+print(spam_distribution)
+
+# Partagez l’échantillon en deux parties (apprentissage/test)
+## Supposons que cela n'a pas été fait, et que DTrain et DTest ne sont pas encore créés
+set.seed(123) # Pour reproductibilité
+index <- createDataPartition(D$Status, p = .75, list = FALSE)
+DTrain <- D[index, ]
+DTest <- D[-index, ]
+```
+#### 5. Implémentation du modèle
+
+```{r}
+
+# Entraînement du modèle de régression logistique avec AIC pour la sélection de variables
+fit.logit.aic <- stepAIC(fit.logit, direction = "both")
+summary(fit.logit.aic)
+
+# Test de Student pour chaque coefficient
+coefs <- summary(fit.logit)$coefficients
+p_values <- coefs[, "Pr(>|z|)"]
+print(p_values)
+
+# Les prédictions des individus de l'échantillon de test en tant que probabilités
+pred_probs <- predict(fit.logit.aic, newdata = DTest, type = "response")
+print(head(pred_probs))
+
+# Convertir les prédictions de probabilités en classes prédites
+pred_classes <- ifelse(pred_probs > 0.5, "phishing", "non_phishing")
+pred_classes <- as.factor(pred_classes)
+print(head(pred_classes))
+
+# Comparaison des probabilités prédites et des classes prédites pour quelques individus
+comparison <- data.frame(Real = DTest$status, Predicted_Prob = round(pred_probs, 2), Predicted_Class = pred_classes)
+print(head(comparison))
+
+# Optionnellement, pour une meilleure analyse, afficher les valeurs réelles et prédites côte à côte
+DTest$predicted_status <- pred_classes
+head(DTest[c("status", "predicted_status")])
+```
+
+#### 6. Evaluation du modèle: Scoring
+
+```{r}
+# Entraînement du modèle de régression logistique avec AIC pour la sélection de variables
+fit.logit.aic <- stepAIC(fit.logit, direction = "both")
+summary(fit.logit.aic)
+
+# Les prédictions des individus de l'échantillon de test en tant que probabilités
+pred_probs <- predict(fit.logit.aic, newdata = DTest, type = "response")
+
+# Convertir les prédictions de probabilités en classes prédites
+pred_classes <- ifelse(pred_probs > 0.5, "spam", "non_spam")
+pred_classes <- as.factor(pred_classes)
+
+# Table de confusion des classes prédites sur l’échantillon test
+confusionMatrixData <- confusionMatrix(pred_classes, DTest$status, positive="spam")
+
+# Affichage de la table de confusion
+print(confusionMatrixData$table)
+
+# Taux de bien classés (Accuracy)
+accuracy <- confusionMatrixData$overall['Accuracy']
+print(paste("Accuracy:", accuracy))
+
+# Taux de vrais négatifs (Specificity) et vrais positifs (Sensitivity)
+specificity <- confusionMatrixData$byClass['Specificity']
+sensitivity <- confusionMatrixData$byClass['Sensitivity']
+print(paste("Specificity:", specificity))
+print(paste("Sensitivity:", sensitivity))
+
+# Retrouvez ces résultats par la commande
+mat <- confusionMatrixData
+mat$byClass[c("Specificity", "Sensitivity")]
+```
+
+#### 7. ROC
+
+```{r}
+# Tracer la courbe ROC
+D_ROC <- data.frame(D = ifelse(DTest$status == "spam", 1, 0), M = pred_probs)
+g <- ggplot(D_ROC, aes(d = D, m = M)) + geom_roc()
+
+# Vérifier que le résultat "positif" correspond bien à spam
+g <- g + style_roc(theme = theme_grey, positive = "1")
+
+# (a) Afficher l’indice AUC
+AUC <- calc_auc(g)
+print(AUC)
+
+# (b) Ajouter cet indice sur le graphe de la courbe ROC précédent
+g + geom_roc(aes(label = round(..y.roc.., 2))) + theme(legend.position = "none") + geom_text(aes(x = .8, y = .2, label = paste("AUC =", round(AUC$AUC, 2))), parse = TRUE)
+
+
+# Réglages de la validation croisée
+ctrl <- trainControl(method = "cv", number = 10, savePredictions = "all")
+
+# Implémentez la régression logistique avec la méthode de validation croisée
+set.seed(123)
+cv_fit.logit <- train(status ~ ., data = DTrain, method = "glm", family = "binomial", trControl = ctrl)
+
+# Affichez les résultats de la validation croisée
+print(cv_fit.logit)
+
+# (b) Afficher la prédiction de chaque individu
+print(cv_fit.logit$pred)
+
+# (c) Tracez la courbe ROC pour la validation croisée
+cv_probs <- cv_fit.logit$pred$prob_spam
+cv_rocCurve <- roc(response = cv_fit.logit$pred$obs, predictor = cv_probs)
+
+plot(cv_rocCurve, main = "Courbe ROC avec validation croisée")
+auc(cv_rocCurve)
+```
+
+#### 9. Comparaison entre la régression logistique et k-NN
+
+```{r}
+# Supposons que "D" est votre dataframe complet.
+set.seed(123) # Assurer la reproductibilité
+index <- createDataPartition(D$status, p = 0.75, list = FALSE) # 75% pour l'apprentissage/validation
+Dsub <- D[index, ]
+Dtest <- D[-index, ]
+
+# Entraînement du modèle k-NN avec k = 5
+knn_pred <- knn(train = Dsub[,-which(names(Dsub) == "status")], 
+                test = Dtest[,-which(names(Dtest) == "status")], 
+                cl = Dsub$status, k = 5)
+# Entraînement du modèle de régression logistique
+fit.logit <- glm(status ~ ., data = Dsub, family = "binomial")
+
+# Prédictions de probabilités sur l'ensemble de test
+logit_probs <- predict(fit.logit, newdata = Dtest, type = "response")
+
+# Conversion des prédictions en facteurs pour k-NN
+knn_pred <- as.factor(knn_pred)
+
+# Table de confusion pour k-NN
+confusionMatrixKnn <- confusionMatrix(knn_pred, Dtest$status)
+print(confusionMatrixKnn$table)
+print(confusionMatrixKnn$overall['Accuracy'])
+
+# Convertir les probabilités de la régression logistique en classe binaire
+logit_pred <- ifelse(logit_probs > 0.5, "phishing", "non_phishing")
+logit_pred <- as.factor(logit_pred)
+
+# Table de confusion pour la régression logistique
+confusionMatrixLogit <- confusionMatrix(logit_pred, Dtest$status)
+print(confusionMatrixLogit$table)
+print(confusionMatrixLogit$overall['Accuracy'])
+
+# ROC pour k-NN
+knn_roc <- roc(Dtest$status, as.numeric(knn_pred == "phishing"))
+plot(knn_roc, main = "ROC Curve pour k-NN")
+auc_knn <- auc(knn_roc)
+print(auc_knn)
+
+# ROC pour la régression logistique
+logit_roc <- roc(Dtest$status, logit_probs)
+plot(logit_roc, main = "ROC Curve pour la régression logistique")
+auc_logit <- auc(logit_roc)
+print(auc_logit)
+
+# Comparaison de l'AUC
+print(paste("AUC pour k-NN:", auc_knn))
+print(paste("AUC pour la regression logistique:", auc_logit))
+
+# Détermination du meilleur modèle
+best_model <- ifelse(auc_knn > auc_logit, "k-NN", "Regression Logistique")
+print(paste("Le meilleur modèle est:", best_model))
+
+
+```
