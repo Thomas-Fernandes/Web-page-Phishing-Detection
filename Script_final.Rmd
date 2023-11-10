@@ -1,0 +1,374 @@
+---
+title: "Web page Phishing Detection"
+author: "Thomas Fernandes, Yassine Ouerghi, Vanessa Kenniche, Mario Miron Ramos"
+date: "2023-11-09"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+L'étude vise à prédire la légitimité des sites web en utilisant diverses techniques de machine learning. Le phénomène du phishing consiste en des tentatives de fraude en ligne par le biais de sites web frauduleux imitant des sites légitimes.
+
+La variable que nous cherchons à prédire est "status", qui indique si un site web est légitime ou potentiellement frauduleux (phishing). Pour ce faire, nous disposons d'un ensemble de données équilibré de 87 variables explicatives différentes, chacune fournissant des informations sur divers aspects de 11430 sites web différents. Ces données incluent 56 variables basées sur la structure, 24 extraites du contenu des pages web correspondantes, 7 obtenues par des requêtes auprès de services externes.
+  
+  
+# 1. Présentation des données
+
+Avant de commencer les différentes modélisations, nous allons regarder comment se structurent nos données.
+
+```{r, include=FALSE, warning=FALSE}
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(corrplot)
+library(ggcorrplot)
+library(caret)
+library(tidyr)
+library(reshape2)
+library(plotROC)
+library(ROCR)
+
+df <- read_csv("dataset_phishing.csv", show_col_types = FALSE)
+df <- df[,-1]
+df$status <- as.factor(df$status)
+```
+
+
+## 1.1. Corrélation entre les variables quantitatives
+
+```{r}
+df_present <- df
+
+#Extraire les variables qualitatives
+v_quali <- vector("logical", length = ncol(df_present) - 1)
+for (i in 2:ncol(df_present)) {
+  v_quali[[i]] <- (length(unique(df_present[[i]])) / sum(!is.na(df_present[[i]]))) < 0.002
+}
+
+num_cols <- character()
+cat_cols <- character()
+
+for (i in 1:length(v_quali)) {
+  if (!v_quali[[i]]) {
+    num_cols <- c(num_cols, names(df_present)[i])
+  } else {
+    cat_cols <- c(cat_cols, names(df_present)[i])
+  }
+}
+
+corr <- cor(df_present[num_cols])
+
+ggcorrplot(
+  corr,
+  hc.order = TRUE,
+  type = "full",
+  outline.color = "white",
+  ggtheme = ggplot2::theme_gray,
+  colors = c("#6D9EC1", "white", "#E46726"),
+  show.diag = TRUE,
+  tl.cex = 7,
+  tl.srt = 90
+)
+```
+
+Comme on s'y attendait, on remarque que de nombreuses variables sont corrélées entre elles. C'est le cas par exemple de longest_word_path et de avg_word_path.
+
+On fait un boxplot de toutes les variables
+
+```{r, warning=FALSE}
+ggplot(data = melt(df_present[, num_cols]), aes(x = variable, y = value)) +
+  geom_boxplot() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+```{r, message=FALSE, warning=FALSE}
+attach(df)
+
+ggplot(df, aes(x = log(length_url), y = log(domain_age))) +
+  geom_point() +
+  labs(x = "Longueur de l'URL", y = "Âge du domaine") +
+  ggtitle("Nuage de points : Longueur de l'URL vs Âge du domaine")
+
+max(domain_age)
+min(domain_age)
+
+# Nuage de point y = longueur url, x = status
+ggplot(df, aes(x = status, y = length_url)) +
+  geom_point() +
+  labs(x = "Status", y = "Longueur de l'URL") +
+  ggtitle("Nuage de points : Longueur de l'URL vs Status")
+
+# Boxplot 
+ggplot(df, aes(x = status, y = log(length_url))) +
+  geom_boxplot() +
+  labs(x = "Status", y = "Longueur de l'URL") +
+  ggtitle("Boxplot : Longueur de l'URL vs Status")
+```
+
+
+## 1.2. Moyenne par statut
+
+```{r,warning=FALSE}
+mean_by_status <- function(df, col_name) {
+  df %>%
+    group_by(status) %>%
+    summarise(mean_value = mean(.data[[col_name]], na.rm = TRUE))
+}
+mean_values_list_cat <- list()
+
+for (col in cat_cols) {
+  mean_values_list_cat[[col]] <- mean_by_status(df_present, col)
+}
+
+mean_values_df_cat <- do.call(rbind, mean_values_list_cat)
+mean_values_df_cat$col_names <- rownames(mean_values_df_cat)
+
+mean_values_df_cat <- mean_values_df_cat[mean_values_df_cat$mean_value > 0.1 | mean_values_df_cat$mean_value < -0.1,]
+mean_values_df_cat <- mean_values_df_cat[!is.na(mean_values_df_cat$mean_value), ]
+
+ggplot(mean_values_df_cat, aes(x = col_names, y = mean_value, fill = status)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(x = "Variables", y = "Moyenne", title = "Moyenne des variables qualitatives par statut") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  scale_fill_manual(values = c("#E46726", "#6D9EC1"))
+```
+
+Le rang de la page semble être la variable qualitative qui influe le plus. C'est la variable pour laquelle on voit la plus grande différence entre (en % de l'autre) la moyenne du groupe 1 et celle du 2.
+
+
+```{r,warning=FALSE}
+mean_values_list_num <- list()
+
+for (col in num_cols) {
+  if (col != "web_traffic" && col != "domain_age" && col != "domain_registration_length") {
+    mean_values_list_num[[col]] <- mean_by_status(df_present, col)
+  }
+}
+
+mean_values_df_num <- do.call(rbind, mean_values_list_num)
+mean_values_df_num$col_names <- rownames(mean_values_df_num)
+
+mean_values_df_num <- mean_values_df_num[mean_values_df_num$mean_value > 0.3 | mean_values_df_num$mean_value < -0.3,]
+mean_values_df_num <- mean_values_df_num[!is.na(mean_values_df_num$mean_value), ]
+
+ggplot(mean_values_df_num, aes(x = col_names, y = mean_value, fill = status)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(x = "Variables", y = "Moyenne", title = "Moyenne des variables quantitatives par statut") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  scale_fill_manual(values = c("#E46726", "#6D9EC1"))
+
+```
+Le nombre d'hyperlien semble être la variable quantitative qui influe le plus.
+
+# 2. K-NN
+
+## 2.1. Préparation des données
+
+On sépare les données en deux sous-ensembles : un pour la phase d'entraînement et l'autre pour la phase de test.
+
+```{r}
+set.seed(123)
+indxTrain <- createDataPartition(df$status, p = 0.75, list = FALSE)
+DTrain <- df[indxTrain, ]
+DTest <- df[-indxTrain, ]
+
+cat("Nombre d'observations dans l'ensemble d'entraînement:", nrow(DTrain), "\n")
+cat("Nombre d'observations dans l'ensemble de test:", nrow(DTest), "\n")
+```
+## 2.2. Prédictions
+
+Pour commencer, nous choisissons arbitrairement un k = 5.
+
+```{r}
+set.seed(123)
+ctrl <- trainControl(method = "none")
+fit.knn <- train(status ~ .,
+                 data = DTrain,
+                 method = "knn",
+                 tuneGrid = data.frame(k = 5),
+                 trControl = ctrl,
+                 na.action = na.omit)
+predictions <- predict(fit.knn, newdata = DTest)
+```
+
+## 2.3. Évaluation du modèle
+
+Dans cette partie de l'analyse, nous évaluons la performance du modèle des k-plus proches voisins (K-NN) que nous avons entraîné pour la détection de sites de phishing. L'utilisation d'une matrice de confusion nous permet de comparer les prédictions du modèle par rapport aux valeurs réelles.
+
+```{r}
+confusionMatrix <- confusionMatrix(predictions, DTest$status)
+
+print(confusionMatrix$table)
+print(confusionMatrix$overall['Accuracy'])
+
+errorRate <- 1 - confusionMatrix$overall['Accuracy']
+print(errorRate)
+
+```
+
+D'après les résultats obtenus, le modèle a une précision d'environ 84.17%, ce qui signifie qu'il a correctement prédit 84.17% des URL comme étant légitimes ou de phishing. La matrice montre également les répartitions spécifiques des vrais positifs, vrais négatifs, faux positifs et faux négatifs. Plus précisément, le modèle a correctement identifié 1164 URL légitimes (Vrais positifs) et 1210 URL de phishing (vrais négatifs), tandis qu'il a incorrectement classé 264 URL légitimes comme phishing (Faux négatifs) et 218 URL de phishing comme légitimes (faux positifs). Le taux d'erreur de 15.82% reflète la proportion de prédictions incorrectes par rapport au total des prédictions.
+
+## 2.4. Choix du K : Cross-Validation
+
+Pour choisir le nombre optimal de voisins k pour notre modèle, nous allons utiliser la validation-croisée sous 10 sous-ensembles. Cela implique de diviser l'ensemble de données d'entraînement en 10 parties, d'utiliser 9 d'entre elles pour l'entraînement et une pour la validation, et de répéter ce processus 10 fois avec des parties différentes à chaque fois pour la validation.
+
+```{r, warning=FALSE}
+set.seed(123)
+
+ctrl <- trainControl(method = "cv", number = 10)
+
+fit.knn.cv <- train(status ~ .,
+                data = DTrain,
+                method = "knn",
+                trControl = ctrl,
+                tuneLength = 50,
+                preProcess = c("center", "scale"),
+                na.action = na.omit)
+
+plot(fit.knn.cv)
+print(fit.knn.cv$results)
+print(fit.knn.cv$bestTune)
+
+bestK <- fit.knn.cv$bestTune$k
+predictionsBestK <- predict(fit.knn.cv, newdata = DTest)
+confusionMatrixBestK <- confusionMatrix(predictionsBestK, DTest$status)
+errorRateBestK <- 1 - confusionMatrixBestK$overall['Accuracy']
+print(errorRateBestK)
+```
+
+Le graphique généré illustre comment la précision de la validation croisée varie en fonction du nombre de voisins k. D'après la visualisation, il semble que la précision augmente lorsque le nombre de voisins est faible et diminue après avoir atteint un pic. Cela suggère qu'un nombre plus réduit de voisins aide le modèle à mieux capturer les nuances des données sans tomber dans le surajustement, où le modèle est trop spécifique aux données d'entraînement et ne généralise pas bien aux nouvelles données.
+
+En analysant les données, j'observe que la précision la plus élevée est obtenue avec k=5. Cela suggère que le modèle classifie les données avec le plus de précision lorsqu'il considère les 5 voisins les plus proches. Ensuite, bien que la précision diminue légèrement avec k=7, elle reste relativement élevée pour k allant jusqu'à 13, après quoi la précision commence à diminuer de manière plus significative. Cela peut indiquer que des valeurs de k plus faibles sont préférables pour ce dataset spécifique, mais qu'il existe une marge avant que l'augmentation de k n'entraîne un sous-ajustement notable.
+
+Il est également important de noter les écarts-types des précisions (AccuracySD) et des scores Kappa (KappaSD), qui fournissent une indication de la variabilité de la performance du modèle à travers les différentes itérations de la validation croisée. Des écarts-types plus faibles sont préférables car ils impliquent une performance plus constante du modèle.
+
+# 3. Régression logistique
+
+Avec les mêmes partitions utilisées pour les KNN, on effectue une régression logistique.
+
+```{r, warning=FALSE, message=FALSE}
+ctrl <- trainControl(method = "none")
+fit.lr <- train(status ~ .,
+                data = DTrain,
+                method = "glm",
+                trControl = ctrl,
+                na.action = na.omit)
+
+class.lr <- predict(fit.lr, newdata = DTest)
+(confusionMatrix(class.lr, DTest$status))
+```
+
+
+## 3.1. Importance et sélection des variables
+
+A l'aide d'un test de Student, on regarde quels sont les variables les plus importantes pour notre analyse. Plus la p.value est petite, plus elle est significative et plus sons "Overall" sera haut.
+
+```{r, warning=FALSE, message=FALSE}
+print(varImp(fit.lr))
+```
+
+La variable la plus importante est `google_index`. On voit que l'importance décroit très vite alors qu'on est seulement sur 20 de nos 87 variables explicatives. Faire une sélection des variables selon le critère de l'AIC peut être pertinent.
+
+```{r, message=FALSE, warning=FALSE}
+ctrl <- trainControl(method = "none")
+#fit.lr.aic <- train(status ~ ., data = DTrain, method = "glmStepAIC", trControl = ctrl, na.action = na.omit)
+load("fit.lr.aic.RDATA")
+```
+
+## 3.2. Prédiction
+
+```{r}
+score.lr.aic <- predict(fit.lr.aic, newdata = DTest, type = "prob")
+#Distribution des classes prédites
+#table(score.lr.aic)
+```
+
+
+## 3.3. Scoring
+
+Pour évaluer la performance de notre modèle, on utilisera analysera d'abord la matrice de confusion. Ensuite, on calculera l'aire sous la courbe ROC (AUC) qui correspond à la probabilité que le modèle classe un exemple positif au hasard plus haut qu'un exemple négatif au hasard. Plus l'AUC est proche de 1, plus le modèle est performant.
+
+### 3.3.1. Matrice de confusion
+
+```{r}
+class.lr.aic <- predict(fit.lr.aic, newdata = DTest)
+(confusionMatrix(class.lr.aic, DTest$status))
+```
+
+Le taux de vrais positifs (TVR, sensibilité) est de :
+
+TVR = VP / (VP + FN) = 1352 / (1352 + 79) = 0.944
+
+Le taux de vrais négatifs (TVN, spécificité) est de :
+
+TVN = VN / (VN + FP) = 1349 / (1349 + 76) = 0.947
+
+### 3.3.2. Courbe ROC
+
+```{r}
+pred <- prediction(score.lr.aic[,2], DTest$status)
+perf <- performance(pred, "tpr", "fpr")
+plot(perf, colorize = FALSE)
+abline(a = 0, b = 1, lty = 2, col = "gray")
+
+```
+
+## 3.4. Avec cross-validation
+
+```{r, message=FALSE, warning=FALSE}
+ctrl = trainControl(method = "cv", classProbs = TRUE,
+                    summaryFunction = twoClassSummary,
+                    savePredictions = "all")
+
+fit.lr.cv <- train(status ~ .,
+                  data = DTrain,
+                  method = "glm",
+                  trControl = ctrl,
+                  na.action = na.omit)
+
+print(fit.lr.cv)
+scoreCV.lr <- fit.lr.cv$pred
+print(head(scoreCV.lr))
+
+predictions <- predict(fit.lr.cv, newdata = DTest, type = "prob")
+actuals <- DTest$status
+pred <- prediction(predictions[,2], actuals)
+perf <- performance(pred, "tpr", "fpr")
+plot(perf, colorize = FALSE)
+abline(a = 0, b = 1, lty = 2, col = "gray")
+
+```
+
+# 4. Comparaison des modèles
+
+```{r, message=FALSE, warning=FALSE}
+ctrl <- trainControl(method = "none")
+fit.knn <- train(status ~ .,
+                data = DTrain,
+                method = "knn",
+                trControl = ctrl,
+                tuneGrid = data.frame(k = 7),
+                na.action = na.omit)
+
+fit.lr = train(status ~ .,
+               data = DTrain,
+               method = "glm",
+               trControl = ctrl,
+               na.action = na.omit)
+
+score.knn = predict(fit.knn ,newdata = DTest, type="prob")
+score.lr = predict(fit.lr ,newdata = DTest, type="prob")
+```
+
+
+```{r, warning=FALSE, message=FALSE}
+score.data = cbind(DTest$status,score.knn["phishing"],score.lr["phishing"])
+colnames(score.data) = c("type.test","knn","logit")
+score.data <- melt_roc(score.data,"type.test",c("knn","logit"))
+g=ggplot(score.data, aes(m = M,d = D,color = name)) + geom_roc()
+g
+print(calc_auc(g)$AUC)
+```

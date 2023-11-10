@@ -11,8 +11,13 @@ output:
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-# Présenation des données
+L'étude vise à prédire la légitimité des sites web en utilisant diverses techniques de machine learning. Le phénomène du phishing consiste en des tentatives de fraude en ligne par le biais de sites web frauduleux imitant des sites légitimes.
 
+La variable que nous cherchons à prédire est "status", qui indique si un site web est légitime ou potentiellement frauduleux (phishing). Pour ce faire, nous disposons d'un ensemble de données équilibré de 88 variables explicatives différentes, chacune fournissant des informations sur divers aspects de 11430 sites web différents. Ces données incluent 56 variables basées sur la structure, 24 extraites du contenu des pages web correspondantes, 7 obtenues par des requêtes auprès de services externes.
+
+# Présentation des données
+
+Avant de commencer les différentes modélisations, nous allons regarder comment se structurent nos données.
 
 ```{r, include=FALSE, warning=FALSE}
 library(readr)
@@ -25,40 +30,32 @@ library(tidyr)
 
 df <- read_csv("dataset_phishing.csv", show_col_types = FALSE)
 df <- df[,-1]
-df_data <- df
+df$status <- as.factor(df$status)
 ```
 
-
-## 1. 
-
-```{r}
-df_data$target <- as.integer(df_data$status == 'legitimate')
-df_data <- df_data[, !names(df_data) %in% c('status')]
-```
+## 1. Corrélation entre les variables quantitatives
 
 ```{r}
-tmp <- data.frame(missing_val = colSums(is.na(df_data)))
-tmp <- tmp[tmp$missing_val != 0, ]
+df_present <- df
 
-likely_cat <- vector("logical", length = ncol(df_data) - 1)
-for (i in 2:ncol(df_data)) {
-  likely_cat[[i]] <- (length(unique(df_data[[i]])) / sum(!is.na(df_data[[i]]))) < 0.002
+#Extraire les variables qualitatives
+v_quali <- vector("logical", length = ncol(df_present) - 1)
+for (i in 2:ncol(df_present)) {
+  v_quali[[i]] <- (length(unique(df_present[[i]])) / sum(!is.na(df_present[[i]]))) < 0.002
 }
 
 num_cols <- character()
 cat_cols <- character()
 
-for (i in 1:length(likely_cat)) {
-  if (!likely_cat[[i]]) {
-    num_cols <- c(num_cols, names(df_data)[i])
+for (i in 1:length(v_quali)) {
+  if (!v_quali[[i]]) {
+    num_cols <- c(num_cols, names(df_present)[i])
   } else {
-    cat_cols <- c(cat_cols, names(df_data)[i])
+    cat_cols <- c(cat_cols, names(df_present)[i])
   }
 }
-```
 
-```{r}
-corr <- cor(df_data[num_cols])
+corr <- cor(df_present[num_cols])
 
 ggcorrplot(
   corr,
@@ -68,20 +65,35 @@ ggcorrplot(
   ggtheme = ggplot2::theme_gray,
   colors = c("#6D9EC1", "white", "#E46726"),
   show.diag = TRUE,
-  tl.cex = 10
+  tl.cex = 8
 )
 ```
 
+On remarque que de nombreuses variables sont corrélées entre elles. 
 
 ```{r}
-df_distr <- df_data %>%
-  group_by(target) %>%
-  summarise(across(num_cols, mean)) %>%
-  pivot_longer(cols = -target, names_to = "feature", values_to = "value")
+mean_by_status <- function(df, col_name) {
+  df %>%
+    group_by(status) %>%
+    summarise(mean_value = mean(.data[[col_name]], na.rm = TRUE))
+}
+# Liste pour stocker les résultats des variables qualitatives
+mean_values_list_cat <- list()
 
-ggplot(df_distr, aes(x = feature, y = value, fill = factor(target))) +
+# Calculer la moyenne pour chaque colonne qualitative
+for (col in cat_cols) {
+  mean_values_list_cat[[col]] <- mean_by_status(df_present, col)
+}
+
+# Convertir les résultats en un dataframe utilisable pour ggplot
+mean_values_df_cat <- do.call(rbind, mean_values_list_cat)
+mean_values_df_cat$col_names <- rownames(mean_values_df_cat)
+
+# Tracer le graphique à barres pour les variables qualitatives
+ggplot(mean_values_df_cat, aes(x = col_names, y = mean_value, fill = status)) +
   geom_bar(stat = "identity", position = "dodge") +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
-  labs(x = "Numerical Features", y = "Average Values", title = "Distribution of Average values across Target")
+  labs(x = "Variables", y = "Moyenne", title = "Moyenne des variables qualitatives par statut") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_fill_manual(values = c("#E46726", "#6D9EC1"))
 ```
 
