@@ -178,55 +178,28 @@ DTest <- df[-indxTrain, ]
 cat("Nombre d'observations dans l'ensemble d'entraînement:", nrow(DTrain), "\n")
 cat("Nombre d'observations dans l'ensemble de test:", nrow(DTest), "\n")
 ```
-## 2.2. Prédictions
 
-Pour commencer, nous choisissons arbitrairement un k = 5.
-
-```{r}
-set.seed(123)
-ctrl <- trainControl(method = "none")
-fit.knn <- train(status ~ .,
-                 data = DTrain,
-                 method = "knn",
-                 tuneGrid = data.frame(k = 5),
-                 trControl = ctrl,
-                 na.action = na.omit)
-predictions <- predict(fit.knn, newdata = DTest)
-```
-
-## 2.3. Évaluation du modèle
-
-Dans cette partie de l'analyse, nous évaluons la performance du modèle des k-plus proches voisins (K-NN) que nous avons entraîné pour la détection de sites de phishing. L'utilisation d'une matrice de confusion nous permet de comparer les prédictions du modèle par rapport aux valeurs réelles.
-
-```{r}
-confusionMatrix <- confusionMatrix(predictions, DTest$status)
-
-print(confusionMatrix$table)
-print(confusionMatrix$overall['Accuracy'])
-
-errorRate <- 1 - confusionMatrix$overall['Accuracy']
-print(errorRate)
-
-```
-
-D'après les résultats obtenus, le modèle a une précision d'environ 84.17%, ce qui signifie qu'il a correctement prédit 84.17% des URL comme étant légitimes ou de phishing. La matrice montre également les répartitions spécifiques des vrais positifs, vrais négatifs, faux positifs et faux négatifs. Plus précisément, le modèle a correctement identifié 1164 URL légitimes (Vrais positifs) et 1210 URL de phishing (vrais négatifs), tandis qu'il a incorrectement classé 264 URL légitimes comme phishing (Faux négatifs) et 218 URL de phishing comme légitimes (faux positifs). Le taux d'erreur de 15.82% reflète la proportion de prédictions incorrectes par rapport au total des prédictions.
-
-## 2.4. Choix du K : Cross-Validation
-
-Pour choisir le nombre optimal de voisins k pour notre modèle, nous allons utiliser la validation-croisée sous 10 sous-ensembles. Cela implique de diviser l'ensemble de données d'entraînement en 10 parties, d'utiliser 9 d'entre elles pour l'entraînement et une pour la validation, et de répéter ce processus 10 fois avec des parties différentes à chaque fois pour la validation.
+## 2.2. Choix du K : Cross-Validation
 
 ```{r, warning=FALSE}
 set.seed(123)
 
 ctrl <- trainControl(method = "cv", number = 10)
 
-fit.knn.cv <- train(status ~ .,
-                data = DTrain,
-                method = "knn",
-                trControl = ctrl,
-                tuneLength = 50,
-                preProcess = c("center", "scale"),
-                na.action = na.omit)
+k_values <- c(1:10, seq(12, 19, by = 2), seq(20, 99, by = 5), seq(100, 500, by = 50))
+
+tune_grid <- expand.grid(k = k_values)
+
+fit.knn.cv <- train(
+    status ~ .,
+    data = DTrain,
+    method = "knn",
+    trControl = ctrl,
+    tuneGrid = tune_grid,
+    preProcess = c("center", "scale"),
+    na.action = na.omit
+)
+
 
 plot(fit.knn.cv)
 print(fit.knn.cv$results)
@@ -239,28 +212,26 @@ errorRateBestK <- 1 - confusionMatrixBestK$overall['Accuracy']
 print(errorRateBestK)
 ```
 
-Le graphique généré illustre comment la précision de la validation croisée varie en fonction du nombre de voisins k. D'après la visualisation, il semble que la précision augmente lorsque le nombre de voisins est faible et diminue après avoir atteint un pic. Cela suggère qu'un nombre plus réduit de voisins aide le modèle à mieux capturer les nuances des données sans tomber dans le surajustement, où le modèle est trop spécifique aux données d'entraînement et ne généralise pas bien aux nouvelles données.
-
-En analysant les données, j'observe que la précision la plus élevée est obtenue avec k=5. Cela suggère que le modèle classifie les données avec le plus de précision lorsqu'il considère les 5 voisins les plus proches. Ensuite, bien que la précision diminue légèrement avec k=7, elle reste relativement élevée pour k allant jusqu'à 13, après quoi la précision commence à diminuer de manière plus significative. Cela peut indiquer que des valeurs de k plus faibles sont préférables pour ce dataset spécifique, mais qu'il existe une marge avant que l'augmentation de k n'entraîne un sous-ajustement notable.
-
-Il est également important de noter les écarts-types des précisions (AccuracySD) et des scores Kappa (KappaSD), qui fournissent une indication de la variabilité de la performance du modèle à travers les différentes itérations de la validation croisée. Des écarts-types plus faibles sont préférables car ils impliquent une performance plus constante du modèle.
+Performance élevée pour les petites valeurs de k : On peut voir que lorsque le nombre de voisins est faible, la performance est plus élevée. Cela suggère que le modèle fait de meilleures prédictions lorsqu'il considère un petit nombre de voisins. À mesure que le nombre de k augmente, la précision tend à diminuer.
 
 # 3. Régression logistique
 
 Avec les mêmes partitions utilisées pour les KNN, on effectue une régression logistique.
 
 ```{r, warning=FALSE, message=FALSE}
-ctrl <- trainControl(method = "none")
+set.seed(123)
+ctrl = trainControl(method = "cv",
+                    classProbs = TRUE,
+                    summaryFunction = twoClassSummary,
+                    savePredictions = "all" )
 fit.lr <- train(status ~ .,
                 data = DTrain,
                 method = "glm",
                 trControl = ctrl,
                 na.action = na.omit)
 
-class.lr <- predict(fit.lr, newdata = DTest)
-(confusionMatrix(class.lr, DTest$status))
+class.lr <- predict(fit.lr, newdata = DTest, type = "prob")
 ```
-
 
 ## 3.1. Importance et sélection des variables
 
@@ -272,11 +243,18 @@ print(varImp(fit.lr))
 
 La variable la plus importante est `google_index`. On voit que l'importance décroit très vite alors qu'on est seulement sur 20 de nos 87 variables explicatives. Faire une sélection des variables selon le critère de l'AIC peut être pertinent.
 
-```{r, message=FALSE, warning=FALSE}
-ctrl <- trainControl(method = "none")
-#fit.lr.aic <- train(status ~ ., data = DTrain, method = "glmStepAIC", trControl = ctrl, na.action = na.omit)
-load("fit.lr.aic.RDATA")
+```{r}
+ctrl = trainControl(method = "cv",
+                    classProbs = TRUE,
+                    summaryFunction = twoClassSummary,
+                    savePredictions = "all" )
+fit.lr.aic <- train(status ~ .,
+                    data = DTrain,
+                    method = "glmStepAIC",
+                    trControl = ctrl,
+                    na.action = na.omit)
 ```
+
 
 ## 3.2. Prédiction
 
@@ -285,7 +263,6 @@ score.lr.aic <- predict(fit.lr.aic, newdata = DTest, type = "prob")
 #Distribution des classes prédites
 #table(score.lr.aic)
 ```
-
 
 ## 3.3. Scoring
 
@@ -305,70 +282,3 @@ TVR = VP / (VP + FN) = 1352 / (1352 + 79) = 0.944
 Le taux de vrais négatifs (TVN, spécificité) est de :
 
 TVN = VN / (VN + FP) = 1349 / (1349 + 76) = 0.947
-
-### 3.3.2. Courbe ROC
-
-```{r}
-pred <- prediction(score.lr.aic[,2], DTest$status)
-perf <- performance(pred, "tpr", "fpr")
-plot(perf, colorize = FALSE)
-abline(a = 0, b = 1, lty = 2, col = "gray")
-
-```
-
-## 3.4. Avec cross-validation
-
-```{r, message=FALSE, warning=FALSE}
-ctrl = trainControl(method = "cv", classProbs = TRUE,
-                    summaryFunction = twoClassSummary,
-                    savePredictions = "all")
-
-fit.lr.cv <- train(status ~ .,
-                  data = DTrain,
-                  method = "glm",
-                  trControl = ctrl,
-                  na.action = na.omit)
-
-print(fit.lr.cv)
-scoreCV.lr <- fit.lr.cv$pred
-print(head(scoreCV.lr))
-
-predictions <- predict(fit.lr.cv, newdata = DTest, type = "prob")
-actuals <- DTest$status
-pred <- prediction(predictions[,2], actuals)
-perf <- performance(pred, "tpr", "fpr")
-plot(perf, colorize = FALSE)
-abline(a = 0, b = 1, lty = 2, col = "gray")
-
-```
-
-# 4. Comparaison des modèles
-
-```{r, message=FALSE, warning=FALSE}
-ctrl <- trainControl(method = "none")
-fit.knn <- train(status ~ .,
-                data = DTrain,
-                method = "knn",
-                trControl = ctrl,
-                tuneGrid = data.frame(k = 7),
-                na.action = na.omit)
-
-fit.lr = train(status ~ .,
-               data = DTrain,
-               method = "glm",
-               trControl = ctrl,
-               na.action = na.omit)
-
-score.knn = predict(fit.knn ,newdata = DTest, type="prob")
-score.lr = predict(fit.lr ,newdata = DTest, type="prob")
-```
-
-
-```{r, warning=FALSE, message=FALSE}
-score.data = cbind(DTest$status,score.knn["phishing"],score.lr["phishing"])
-colnames(score.data) = c("type.test","knn","logit")
-score.data <- melt_roc(score.data,"type.test",c("knn","logit"))
-g=ggplot(score.data, aes(m = M,d = D,color = name)) + geom_roc()
-g
-print(calc_auc(g)$AUC)
-```
