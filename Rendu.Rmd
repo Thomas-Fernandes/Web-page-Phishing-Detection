@@ -1,0 +1,460 @@
+---
+title: "Web page Phishing Detection"
+author: "Thomas Fernandes, Yassine Ouerghi, Vanessa Kenniche, Mario Miron Ramos"
+date: "2023-11-09"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+L'étude vise à prédire la légitimité des sites web en utilisant diverses techniques de machine learning. Le phénomène du phishing consiste en des tentatives de fraude en ligne par le biais de sites web frauduleux imitant des sites légitimes.
+
+La variable que nous cherchons à prédire est "status", qui indique si un site web est légitime ou potentiellement frauduleux (phishing). Pour ce faire, nous disposons d'un ensemble de données équilibré de 87 variables explicatives différentes, chacune fournissant des informations sur divers aspects de 11430 sites web différents. Ces données incluent 56 variables basées sur la structure, 24 extraites du contenu des pages web correspondantes, 7 obtenues par des requêtes auprès de services externes.
+  
+  
+# 1. Présentation des données
+
+Avant de commencer les différentes modélisations, nous allons regarder comment se structurent nos données.
+
+```{r, include=FALSE, warning=FALSE}
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(corrplot)
+library(ggcorrplot)
+library(caret)
+library(tidyr)
+library(reshape2)
+library(plotROC)
+library(ROCR)
+
+df <- read_csv("dataset_phishing.csv", show_col_types = FALSE)
+df <- df[,-1]
+df$status <- as.factor(df$status)
+```
+
+
+## 1.1. Corrélation entre les variables quantitatives
+
+```{r}
+df_present <- df
+
+#Extraire les variables qualitatives
+v_quali <- vector("logical", length = ncol(df_present) - 1)
+for (i in 2:ncol(df_present)) {
+  v_quali[[i]] <- (length(unique(df_present[[i]])) / sum(!is.na(df_present[[i]]))) < 0.002
+}
+
+num_cols <- character()
+cat_cols <- character()
+
+for (i in 1:length(v_quali)) {
+  if (!v_quali[[i]]) {
+    num_cols <- c(num_cols, names(df_present)[i])
+  } else {
+    cat_cols <- c(cat_cols, names(df_present)[i])
+  }
+}
+
+corr <- cor(df_present[num_cols])
+
+ggcorrplot(
+  corr,
+  hc.order = TRUE,
+  type = "full",
+  outline.color = "white",
+  ggtheme = ggplot2::theme_gray,
+  colors = c("#6D9EC1", "white", "#E46726"),
+  show.diag = TRUE,
+  tl.cex = 7,
+  tl.srt = 90
+)
+```
+
+Comme on s'y attendait, on remarque que de nombreuses variables sont corrélées entre elles. C'est le cas par exemple de longest_word_path et de avg_word_path.
+
+On fait un boxplot de toutes les variables
+
+```{r, warning=FALSE}
+ggplot(data = melt(df_present[, num_cols]), aes(x = variable, y = value)) +
+  geom_boxplot() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+```{r, message=FALSE, warning=FALSE}
+attach(df)
+
+ggplot(df, aes(x = log(length_url), y = log(domain_age))) +
+  geom_point() +
+  labs(x = "Longueur de l'URL", y = "Âge du domaine") +
+  ggtitle("Nuage de points : Longueur de l'URL vs Âge du domaine")
+
+max(domain_age)
+min(domain_age)
+
+# Nuage de point y = longueur url, x = status
+ggplot(df, aes(x = status, y = length_url)) +
+  geom_point() +
+  labs(x = "Status", y = "Longueur de l'URL") +
+  ggtitle("Nuage de points : Longueur de l'URL vs Status")
+
+# Boxplot 
+ggplot(df, aes(x = status, y = log(length_url))) +
+  geom_boxplot() +
+  labs(x = "Status", y = "Longueur de l'URL") +
+  ggtitle("Boxplot : Longueur de l'URL vs Status")
+```
+
+
+## 1.2. Moyenne par statut
+
+```{r,warning=FALSE}
+mean_by_status <- function(df, col_name) {
+  df %>%
+    group_by(status) %>%
+    summarise(mean_value = mean(.data[[col_name]], na.rm = TRUE))
+}
+mean_values_list_cat <- list()
+
+for (col in cat_cols) {
+  mean_values_list_cat[[col]] <- mean_by_status(df_present, col)
+}
+
+mean_values_df_cat <- do.call(rbind, mean_values_list_cat)
+mean_values_df_cat$col_names <- rownames(mean_values_df_cat)
+
+mean_values_df_cat <- mean_values_df_cat[mean_values_df_cat$mean_value > 0.1 | mean_values_df_cat$mean_value < -0.1,]
+mean_values_df_cat <- mean_values_df_cat[!is.na(mean_values_df_cat$mean_value), ]
+
+ggplot(mean_values_df_cat, aes(x = col_names, y = mean_value, fill = status)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(x = "Variables", y = "Moyenne", title = "Moyenne des variables qualitatives par statut") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  scale_fill_manual(values = c("#E46726", "#6D9EC1"))
+```
+
+Le rang de la page semble être la variable qualitative qui influe le plus. C'est la variable pour laquelle on voit la plus grande différence entre (en % de l'autre) la moyenne du groupe 1 et celle du 2.
+
+
+```{r,warning=FALSE}
+mean_values_list_num <- list()
+
+for (col in num_cols) {
+  if (col != "web_traffic" && col != "domain_age" && col != "domain_registration_length") {
+    mean_values_list_num[[col]] <- mean_by_status(df_present, col)
+  }
+}
+
+mean_values_df_num <- do.call(rbind, mean_values_list_num)
+mean_values_df_num$col_names <- rownames(mean_values_df_num)
+
+mean_values_df_num <- mean_values_df_num[mean_values_df_num$mean_value > 0.3 | mean_values_df_num$mean_value < -0.3,]
+mean_values_df_num <- mean_values_df_num[!is.na(mean_values_df_num$mean_value), ]
+
+ggplot(mean_values_df_num, aes(x = col_names, y = mean_value, fill = status)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(x = "Variables", y = "Moyenne", title = "Moyenne des variables quantitatives par statut") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  scale_fill_manual(values = c("#E46726", "#6D9EC1"))
+
+```
+Le nombre d'hyperlien semble être la variable quantitative qui influe le plus.
+
+# 2. Modélisation
+
+## 2.1. Préparation du jeu de données
+
+On sépare le jeu de données en un échantillon d’entraînement et un échantillon test, qui seront les mêmes pour tous les modèles.
+
+```{r}
+set.seed(123)
+indxTrain <- createDataPartition(df$status, p = 0.75, list = FALSE)
+DTrain <- df[indxTrain, ]
+DTest <- df[-indxTrain, ]
+```
+
+## 2.2. Variable de controle
+
+```{r}
+ctrl <- trainControl(method = "cv", number = 5)
+```
+
+## 2.3. Entrainement
+
+### KNN
+
+```{r}
+set.seed(123)
+
+k <- c(1:10, seq(12, 19, by = 2), seq(20, 99, by = 5), seq(100, 500, by = 50))
+
+#fit.knn.cv <- train(status ~ .,data = DTrain,method = "knn",trControl = ctrl,tuneGrid = expand.grid(k = k),preProcess = c("center", "scale"),na.action = na.omit)
+load("C:/Users/thoma/Desktop/Github/Web-page-Phishing-Detection/fit.knn.cv.RDATA")
+plot(fit.knn.cv)
+bestK <- fit.knn.cv$bestTune$k
+print(fit.knn.cv$results)
+```
+
+### Regression logistique
+
+```{r}
+#Sans AIC
+fit.lr <- train(status ~ .,
+                data = DTrain,
+                method = "glm",
+                trControl = ctrl,
+                na.action = na.omit)
+print(varImp(fit.lr))
+
+#Avec AIC
+#fit.lr.aic <- train(status ~ ., data = DTrain, method = "glmStepAIC", trControl = ctrl, na.action = na.omit)
+load("C:/Users/thoma/Desktop/Github/Web-page-Phishing-Detection/fit.lr.aic.RDATA")
+```
+
+### NB
+
+```{r}
+fit.nb = train(status ~ ., data = DTrain, method = "nb", trControl = ctrl)
+```
+
+### LDA
+
+```{r}
+fit.lda = train(status ~ ., 
+                data = DTrain[, -c(9, 60, 62, 64, 69, 72)],
+                method="lda",
+                trControl=ctrl)
+```
+
+### QDA
+
+```{r}
+fit.qda = train(status ~ ., 
+                data = DTrain[, c(88, 86, 87, 21, 51, 83, 57, 36, 45, 27, 2, 5, 79, 11, 25, 82, 59, 63, 71, 48, 20)],
+                method="qda",
+                trControl=ctrl)
+```
+
+### SVM - Séparateur Linéaire
+
+```{r}
+svmGrid_lin = seq(0.0001, 0.01 ,by = 0.001)
+fit.Lin.svm = train(status ~ ., data = DTrain, method = "svmLinear", type = "C-svc", trControl = ctrl, tuneGrid = data.frame(.C = svmGrid_lin))
+```
+
+### SVM - Séparateur Quadratique
+
+```{r}
+#Noyau Radial
+svmGrid_quad = seq(0.0001, 0.01 ,by = 0.001)
+fit.Quad.svm = train(status ~ .,
+                     data = DTrain,
+                     method = "svmRadial",
+                     type = "C-svc",
+                     trControl = ctrl,
+                     tuneGrid = data.frame(.C = svmGrid_quad, .sigma = 0.1))
+plot(fit.Quad.svm)
+fit.Quad.svm$bestTune
+
+#Noyau polynomial
+svmGrid_poly = seq(0.0001, 0.01 ,by = 0.001)
+fit.Poly.svm = train(status ~ .,
+                     data = DTrain,
+                     method = "svmPoly",
+                     type = "C-svc",
+                     trControl = ctrl,
+                     tuneGrid = data.frame(.C = svmGrid_poly, .degree = 2))
+plot(fit.Poly.svm)
+fit.Poly.svm$bestTune
+```
+
+## Prédictions
+
+### KNN
+```{r}
+set.seed(123)
+predictionsBestK <- predict(fit.knn.cv, newdata = DTest)
+confusionMatrixBestK <- confusionMatrix(predictionsBestK, DTest$status)
+print(confusionMatrixBestK$overall['Accuracy'])
+```
+
+```{r}
+set.seed(123)
+predictionsBestK <- predict(fit.knn.cv, newdata = DTest, type = "prob")
+
+pred.knn <- prediction(predictionsBestK[,2], DTest$status)
+perf.knn <- performance(pred.knn, "tpr", "fpr")
+plot(perf)
+auc.knn <- performance(pred.knn, "auc")@y.values[[1]]
+```
+
+### Regression logistique
+
+```{r}
+class.lr <- predict(fit.lr, newdata = DTest)
+print(varImp(fit.lr))
+class.lr.aic <- predict(fit.lr.aic, newdata = DTest)
+
+confusionMatrixLR <- confusionMatrix(class.lr, DTest$status)
+confusionMatrixLRAIC <- confusionMatrix(class.lr.aic, DTest$status)
+print(confusionMatrixLR$overall['Accuracy'])
+print(confusionMatrixLRAIC$overall['Accuracy'])
+```
+
+
+```{r}
+class.lr <- predict(fit.lr, newdata = DTest, type = "prob")
+class.lr.aic <- predict(fit.lr.aic, newdata = DTest, type = "prob")
+
+pred.lr <- prediction(class.lr[,2], DTest$status)
+perf.lr <- performance(pred.lr, "tpr", "fpr")
+plot(perf.lr)
+auc.lr <- performance(pred.lr, "auc")@y.values[[1]]
+```
+
+### NB
+
+```{r}
+#Accuracy
+class.nb <- predict(fit.nb, newdata = DTest)
+confusionMatrixNB <- confusionMatrix(class.nb, DTest$status)
+print(confusionMatrixNB$overall['Accuracy'])
+
+pred.nb = predict(fit.nb, newdata=DTest[,-88], type = "prob")
+
+pred.nb <- prediction(pred.nb[,2], DTest$status)
+perf.nb <- performance(pred.nb, "tpr", "fpr")
+plot(perf.nb)
+auc.nb <- performance(pred.nb, "auc")@y.values[[1]]
+```
+
+### LDA
+
+```{r}
+class.lda <- predict(fit.lda, newdata = DTest)
+confusionMatrixLDA <- confusionMatrix(class.lda, DTest$status)
+print(confusionMatrixLDA$overall['Accuracy'])
+
+pred.lda = predict(fit.lda, newdata=DTest[,-c(9, 60, 62, 64, 69, 72, 88)], type = "prob")
+pred.lda <- prediction(pred.lda[,2], DTest$status)
+perf.lda <- performance(pred.lda, "tpr", "fpr")
+plot(perf.lda)
+auc.lda <- performance(pred.lda, "auc")@y.values[[1]]
+```
+
+### QDA
+
+```{r}
+class.qda <- predict(fit.qda, newdata = DTest)
+confusionMatrixQDA <- confusionMatrix(class.qda, DTest$status)
+print(confusionMatrixQDA$overall['Accuracy'])
+
+pred.qda = predict(fit.qda, newdata=DTest[,c(88, 86, 87, 21, 51, 83, 57, 36, 45, 27, 2, 5, 79, 11, 25, 82, 59, 63, 71, 48, 20)], type = "prob")
+pred.qda <- prediction(pred.qda[,2], DTest$status)
+perf.qda <- performance(pred.qda, "tpr", "fpr")
+plot(perf.qda)
+auc.qda <- performance(pred.qda, "auc")@y.values[[1]]
+```
+
+### SVM - Séparateur Linéaire
+
+```{r}
+class.Lin.svm <- predict(fit.Lin.svm, newdata = DTest)
+confusionMatrixLinSVM <- confusionMatrix(class.Lin.svm, DTest$status)
+print(confusionMatrixLinSVM$overall['Accuracy'])
+
+pred.Lin.svm = predict(fit.Lin.svm, newdata = DTest, type = "prob")
+pred.Lin.svm <- prediction(pred.Lin.svm[,2], DTest$status)
+perf.Lin.svm <- performance(pred.Lin.svm, "tpr", "fpr")
+plot(perf.Lin.svm)
+auc.Lin.svm <- performance(pred.Lin.svm, "auc")@y.values[[1]]
+```
+
+### SVM - Séparateur Quadratique
+
+#### Noyau Radial
+
+```{r}
+class.Quad.svm <- predict(fit.Quad.svm, newdata = DTest)
+confusionMatrixQuadSVM <- confusionMatrix(class.Quad.svm, DTest$status)
+print(confusionMatrixQuadSVM$overall['Accuracy'])
+
+pred.Quad.svm = predict(fit.Quad.svm, newdata=DTest, type = "prob")
+pred.Quad.svm <- prediction(pred.Quad.svm[,2], DTest$status)
+perf.Quad.svm <- performance(pred.Quad.svm, "tpr", "fpr")
+plot(perf.Quad.svm)
+auc.Quad.svm <- performance(pred.Quad.svm, "auc")@y.values[[1]]
+```
+
+```{r}
+class.Poly.svm <- predict(fit.Poly.svm, newdata = DTest)
+confusionMatrixPolySVM <- confusionMatrix(class.Poly.svm, DTest$status)
+print(confusionMatrixPolySVM$overall['Accuracy'])
+
+pred.Poly.svm = predict(fit.Poly.svm, newdata=DTest, type = "prob")
+pred.Poly.svm <- prediction(pred.Poly.svm[,2], DTest$status)
+perf.Poly.svm <- performance(pred.Poly.svm, "tpr", "fpr")
+plot(perf.Poly.svm)
+auc.Poly.svm <- performance(pred.Poly.svm, "auc")@y.values[[1]]
+```
+
+## Comparaison des modèles
+
+
+On fait un dataframe récapitulatif avec en ligne les différents modèles et en colonne on aura accuracy, sensibilité, spécificité et AUC.
+
+Pour l'instant, on ne fait que pour KNN, logistique, NB, LDA et QDA.
+
+```{r}
+models <- c("KNN", "Logistique", "NB", "LDA", "QDA")
+accuracy <- c(confusionMatrixBestK$overall['Accuracy'], confusionMatrixLR$overall['Accuracy'], confusionMatrixNB$overall['Accuracy'], confusionMatrixLDA$overall['Accuracy'], confusionMatrixQDA$overall['Accuracy'])
+sensibilite <- c(confusionMatrixBestK$byClass['Sensitivity'], confusionMatrixLR$byClass['Sensitivity'], confusionMatrixNB$byClass['Sensitivity'], confusionMatrixLDA$byClass['Sensitivity'], confusionMatrixQDA$byClass['Sensitivity'])
+specificite <- c(confusionMatrixBestK$byClass['Specificity'], confusionMatrixLR$byClass['Specificity'], confusionMatrixNB$byClass['Specificity'], confusionMatrixLDA$byClass['Specificity'], confusionMatrixQDA$byClass['Specificity'])
+auc <- c(auc.knn, auc.lr, auc.nb, auc.lda, auc.qda)
+
+df_models <- data.frame(models, accuracy, sensibilite, specificite, auc)
+df_models
+```
+
+On fait 1 graphqiue avec toutes les courbes ROC et on affiche les valeurs AUC.
+
+```{r}
+legend_labels <- c(
+    paste("KNN (AUC =", round(auc.knn, 3), ")"),
+    paste("Logistique (AUC =", round(auc.lr, 3), ")"),
+    paste("NB (AUC =", round(auc.nb, 3), ")"),
+    paste("LDA (AUC =", round(auc.lda, 3), ")"),
+    paste("QDA (AUC =", round(auc.qda, 3), ")")
+)
+
+plot(perf.knn, col = "red", main = "Courbes ROC", lty = 1)
+plot(perf.lr, col = "blue", add = TRUE, lty = 2)
+plot(perf.nb, col = "green", add = TRUE, lty = 3)
+plot(perf.lda, col = "orange", add = TRUE, lty = 4)
+plot(perf.qda, col = "purple", add = TRUE, lty = 5)
+
+legend(0.5, 0.5, legend = legend_labels, col = c("red", "blue", "green", "orange", "purple"), lty = c(1, 2, 3, 4, 5), cex = 0.8)
+```
+
+On fait le même graphique mais en zoom sur la partie gauche.
+
+```{r}
+legend_labels <- c(
+    paste("KNN (AUC =", round(auc.knn, 3), ")"),
+    paste("Logistique (AUC =", round(auc.lr, 3), ")"),
+    paste("NB (AUC =", round(auc.nb, 3), ")"),
+    paste("LDA (AUC =", round(auc.lda, 3), ")"),
+    paste("QDA (AUC =", round(auc.qda, 3), ")")
+)
+
+plot(perf.knn, col = "red", main = "Courbes ROC", lty = 1, xlim = c(0, 0.2), ylim = c(0.8, 1))
+plot(perf.lr, col = "blue", add = TRUE, lty = 2)
+plot(perf.nb, col = "green", add = TRUE, lty = 3)
+plot(perf.lda, col = "orange", add = TRUE, lty = 4)
+plot(perf.qda, col = "purple", add = TRUE, lty = 5)
+
+legend(0.13, 0.88, legend = legend_labels, col = c("red", "blue", "green", "orange", "purple"), lty = c(1, 2, 3, 4, 5), cex = 0.8)
+```

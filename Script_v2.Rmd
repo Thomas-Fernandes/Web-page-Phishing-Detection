@@ -285,13 +285,121 @@ TVN = VN / (VN + FP) = 1349 / (1349 + 76) = 0.947
 
 # 4. NB, LDA et QDA
 
+## NB
+
+```{r}
+set.seed(123)
+ctrl <- trainControl(method = "cv", number = 10)
+fit.nb = train(status ~ ., data = DTrain, method="nb", trControl=ctrl)
+pred.nb = predict(fit.nb, newdata=DTest[,-88])
+tab = table(pred.nb, DTest$status)
+mat = confusionMatrix(tab)
+mat$overall["Accuracy"]
+```
+
 ## LDA
 
 ```{r}
 set.seed(123)
 ctrl = trainControl(method = "cv", number = 10)
-fit.nb <- train(status ~ .,
-                data = DTrain,
-                method = "lda",
-                trControl = ctrl)
+# Entraîner le modèle LDA en excluant directement les variables constantes
+fit.lda = train(status ~ ., 
+                data = DTrain[, -c(9, 60, 62, 64, 69, 72)],
+                method="lda",
+                trControl=ctrl)
+pred.lda = predict(fit.lda, newdata=DTest[,-88])
+tab = table(pred.lda, DTest$status)
+mat = confusionMatrix(tab)
+mat$overall["Accuracy"]
+```
+
+## QDA 
+
+```{r}
+set.seed(123)
+
+#Pour que la matrce soit de plein rang, il faut moins de variables. On ne garde que le top 20 variables par importance
+fit.qda = train(status ~ ., 
+                data = DTrain[, c(88, 86, 87, 21, 51, 83, 57, 36, 45, 27, 2, 5, 79, 11, 25, 82, 59, 63, 71, 48, 20)],
+                method="qda",
+                trControl=ctrl)
+
+pred.qda = predict(fit.qda, newdata=DTest[,-88])
+tab = table(pred.qda, DTest$status)
+mat = confusionMatrix(tab)
+mat$overall["Accuracy"]
+```
+
+# SVM
+
+## Séparateur linéaire
+
+```{r}
+ctrl <- trainControl(method = "cv", number = 5)
+svmGrid_lin = seq(0.0001, 0.01 ,by = 0.001)
+fit.Lin.svm = train(status ~ .,
+                    data = DTrain,
+                    method = "svmLinear",
+                    type = "C-svc",
+                    trControl = ctrl,
+                    tuneGrid = data.frame(.C = svmGrid_lin))
+plot(fit.Lin.svm)
+fit.Lin.svm$bestTune
+#precision
+pred.Lin.svm = predict(fit.Lin.svm, newdata = DTest)
+tab = table(pred.Lin.svm, DTest$status)
+mat = confusionMatrix(tab)
+mat$overall["Accuracy"]
+```
+
+## Séparateur quadratique
+
+```{r}
+ctrl <- trainControl(method = "cv", number = 5, classProbs = TRUE, summaryFunction = twoClassSummary, savePredictions = "all")
+svmGrid_quad = seq(0.0001, 0.01 ,by = 0.001)
+fit.Quad.svm = train(status ~ .,
+                     data = DTrain,
+                     method = "svmRadial",
+                     type = "C-svc",
+                     trControl = ctrl,
+                     tuneGrid = data.frame(.C = svmGrid_quad, .sigma = 0.1))
+plot(fit.Quad.svm)
+fit.Quad.svm$bestTune
+#precision
+pred.Quad.svm = predict(fit.Quad.svm, newdata = DTest)
+tab = table(pred.Quad.svm, DTest$status)
+mat = confusionMatrix(tab)
+mat$overall["Accuracy"]
+```
+
+## Noyau polynomial
+
+```{r}
+ctrl <- trainControl(method = "cv", number = 2, classProbs = TRUE, summaryFunction = twoClassSummary, savePredictions = "all")
+svmGrid_poly = seq(0.0001, 0.01 ,by = 0.001)
+fit.Poly.svm = train(status ~ .,
+                     data = DTrain,
+                     method = "svmPoly",
+                     type = "C-svc",
+                     trControl = ctrl,
+                     tuneGrid = data.frame(.C = svmGrid_poly, .degree = 2))
+plot(fit.Poly.svm)
+fit.Poly.svm$bestTune
+#precision
+pred.Poly.svm = predict(fit.Poly.svm, newdata = DTest)
+tab = table(pred.Poly.svm, DTest$status)
+mat = confusionMatrix(tab)
+mat$overall["Accuracy"]
+```
+
+# Comparaison des méthodes
+
+```{r}
+#Tableau récapitulatif avec la précision de chaque modèle, sa sensibilité et sa spécificité (KNN, glm, glm.aic, nb, lda, qda, svm.lin, svm.quad, svm.poly)
+res <- matrix(0, nrow = 9, ncol = 3)
+colnames(res) <- c("Accuracy", "Sensitivity", "Specificity")
+rownames(res) <- c("KNN", "glm", "glm.aic", "nb", "lda", "qda", "svm.lin", "svm.quad", "svm.poly")
+#On met les valeurs obtenues depuis les fit
+res[1,] <- c(errorRateBestK, confusionMatrixBestK$byClass["Sensitivity"], confusionMatrixBestK$byClass["Specificity"])
+res[2,] <- c(fit.lr$results$Accuracy[1], fit.lr$results$Sensitivity[1], fit.lr$results$Specificity[1])
 ```
