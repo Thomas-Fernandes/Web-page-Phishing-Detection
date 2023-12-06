@@ -282,3 +282,16 @@ TVR = VP / (VP + FN) = 1352 / (1352 + 79) = 0.944
 Le taux de vrais négatifs (TVN, spécificité) est de :
 
 TVN = VN / (VN + FP) = 1349 / (1349 + 76) = 0.947
+
+# 4. NB, LDA et QDA
+
+## LDA
+
+```{r}
+set.seed(123)
+ctrl = trainControl(method = "cv", number = 10)
+fit.nb <- train(status ~ .,
+                data = DTrain,
+                method = "lda",
+                trControl = ctrl)
+```
