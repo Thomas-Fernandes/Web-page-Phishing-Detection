@@ -2,7 +2,9 @@
 title: "Web page Phishing Detection"
 author: "Thomas Fernandes, Yassine Ouerghi, Vanessa Kenniche, Mario Miron Ramos"
 date: "2023-11-09"
-output: pdf_document
+output:
+  html_document:
+    df_print: paged
 ---
 
 ```{r setup, include=FALSE}
@@ -180,6 +182,7 @@ DTest <- df[-indxTrain, ]
 
 ```{r}
 ctrl <- trainControl(method = "cv", number = 5)
+ctrl_temp <- trainControl(method = "none")
 ```
 
 ## 2.3. Entrainement
@@ -241,34 +244,27 @@ fit.qda = train(status ~ .,
 ### SVM - Séparateur Linéaire
 
 ```{r}
-svmGrid_lin = seq(0.0001, 0.01 ,by = 0.001)
-fit.Lin.svm = train(status ~ ., data = DTrain, method = "svmLinear", type = "C-svc", trControl = ctrl, tuneGrid = data.frame(.C = svmGrid_lin))
+#svmGrid_lin = seq(0.0001, 0.01 ,by = 0.001)
+#fit.Lin.svm = train(status ~ ., data = DTrain, method = "svmLinear", type = "C-svc", trControl = ctrl, tuneGrid = data.frame(.C = 0.1))
+#load("C:/Users/thoma/Desktop/Github/Web-page-Phishing-Detection/fit.Lin.svm.RDATA")
+#plot(fit.Lin.svm)
 ```
 
 ### SVM - Séparateur Quadratique
 
 ```{r}
 #Noyau Radial
-svmGrid_quad = seq(0.0001, 0.01 ,by = 0.001)
-fit.Quad.svm = train(status ~ .,
-                     data = DTrain,
-                     method = "svmRadial",
-                     type = "C-svc",
-                     trControl = ctrl,
-                     tuneGrid = data.frame(.C = svmGrid_quad, .sigma = 0.1))
-plot(fit.Quad.svm)
-fit.Quad.svm$bestTune
+#svmGrid_quad = seq(0.0001, 0.01 ,by = 0.001)
+#fit.Quad.svm = train(status ~ ., data = DTrain, method = "svmRadial", type = "C-svc", trControl = ctrl, tuneGrid = data.frame(.C = svmGrid_quad, .sigma = 0.1))
+#load("C:/Users/thoma/Desktop/Github/Web-page-Phishing-Detection/fit.Quad.svm.RDATA")
+#plot(fit.Quad.svm)
+#fit.Quad.svm$bestTune
 
 #Noyau polynomial
-svmGrid_poly = seq(0.0001, 0.01 ,by = 0.001)
-fit.Poly.svm = train(status ~ .,
-                     data = DTrain,
-                     method = "svmPoly",
-                     type = "C-svc",
-                     trControl = ctrl,
-                     tuneGrid = data.frame(.C = svmGrid_poly, .degree = 2))
-plot(fit.Poly.svm)
-fit.Poly.svm$bestTune
+#svmGrid_poly = seq(0.0001, 0.01 ,by = 0.001)
+#fit.Poly.svm = train(status ~ ., data = DTrain, method = "svmPoly", type = "C-svc", trControl = ctrl_temp, tuneGrid = data.frame(.C = 0.1))
+#plot(fit.Poly.svm)
+#fit.Poly.svm$bestTune
 ```
 
 ## Prédictions
@@ -287,7 +283,7 @@ predictionsBestK <- predict(fit.knn.cv, newdata = DTest, type = "prob")
 
 pred.knn <- prediction(predictionsBestK[,2], DTest$status)
 perf.knn <- performance(pred.knn, "tpr", "fpr")
-plot(perf)
+plot(perf.knn)
 auc.knn <- performance(pred.knn, "auc")@y.values[[1]]
 ```
 
@@ -362,15 +358,15 @@ auc.qda <- performance(pred.qda, "auc")@y.values[[1]]
 ### SVM - Séparateur Linéaire
 
 ```{r}
-class.Lin.svm <- predict(fit.Lin.svm, newdata = DTest)
-confusionMatrixLinSVM <- confusionMatrix(class.Lin.svm, DTest$status)
-print(confusionMatrixLinSVM$overall['Accuracy'])
+#class.Lin.svm <- predict(fit.Lin.svm, newdata = DTest)
+#confusionMatrixLinSVM <- confusionMatrix(class.Lin.svm, DTest$status)
+#print(confusionMatrixLinSVM$overall['Accuracy'])
 
-pred.Lin.svm = predict(fit.Lin.svm, newdata = DTest, type = "prob")
-pred.Lin.svm <- prediction(pred.Lin.svm[,2], DTest$status)
-perf.Lin.svm <- performance(pred.Lin.svm, "tpr", "fpr")
-plot(perf.Lin.svm)
-auc.Lin.svm <- performance(pred.Lin.svm, "auc")@y.values[[1]]
+#pred.Lin.svm = predict(fit.Lin.svm, newdata = DTest, type = "prob")
+#pred.Lin.svm <- prediction(pred.Lin.svm[,2], DTest$status)
+#perf.Lin.svm <- performance(pred.Lin.svm, "tpr", "fpr")
+#plot(perf.Lin.svm)
+#auc.Lin.svm <- performance(pred.Lin.svm, "auc")@y.values[[1]]
 ```
 
 ### SVM - Séparateur Quadratique
@@ -378,27 +374,27 @@ auc.Lin.svm <- performance(pred.Lin.svm, "auc")@y.values[[1]]
 #### Noyau Radial
 
 ```{r}
-class.Quad.svm <- predict(fit.Quad.svm, newdata = DTest)
-confusionMatrixQuadSVM <- confusionMatrix(class.Quad.svm, DTest$status)
-print(confusionMatrixQuadSVM$overall['Accuracy'])
+#class.Quad.svm <- predict(fit.Quad.svm, newdata = DTest)
+#confusionMatrixQuadSVM <- confusionMatrix(class.Quad.svm, DTest$status)
+#print(confusionMatrixQuadSVM$overall['Accuracy'])
 
-pred.Quad.svm = predict(fit.Quad.svm, newdata=DTest, type = "prob")
-pred.Quad.svm <- prediction(pred.Quad.svm[,2], DTest$status)
-perf.Quad.svm <- performance(pred.Quad.svm, "tpr", "fpr")
-plot(perf.Quad.svm)
-auc.Quad.svm <- performance(pred.Quad.svm, "auc")@y.values[[1]]
+#pred.Quad.svm = predict(fit.Quad.svm, newdata=DTest, type = "prob")
+#pred.Quad.svm <- prediction(pred.Quad.svm[,2], DTest$status)
+#perf.Quad.svm <- performance(pred.Quad.svm, "tpr", "fpr")
+#plot(perf.Quad.svm)
+#auc.Quad.svm <- performance(pred.Quad.svm, "auc")@y.values[[1]]
 ```
 
 ```{r}
-class.Poly.svm <- predict(fit.Poly.svm, newdata = DTest)
-confusionMatrixPolySVM <- confusionMatrix(class.Poly.svm, DTest$status)
-print(confusionMatrixPolySVM$overall['Accuracy'])
+#class.Poly.svm <- predict(fit.Poly.svm, newdata = DTest)
+#confusionMatrixPolySVM <- confusionMatrix(class.Poly.svm, DTest$status)
+#print(confusionMatrixPolySVM$overall['Accuracy'])
 
-pred.Poly.svm = predict(fit.Poly.svm, newdata=DTest, type = "prob")
-pred.Poly.svm <- prediction(pred.Poly.svm[,2], DTest$status)
-perf.Poly.svm <- performance(pred.Poly.svm, "tpr", "fpr")
-plot(perf.Poly.svm)
-auc.Poly.svm <- performance(pred.Poly.svm, "auc")@y.values[[1]]
+#pred.Poly.svm = predict(fit.Poly.svm, newdata=DTest, type = "prob")
+#pred.Poly.svm <- prediction(pred.Poly.svm[,2], DTest$status)
+#perf.Poly.svm <- performance(pred.Poly.svm, "tpr", "fpr")
+#plot(perf.Poly.svm)
+#auc.Poly.svm <- performance(pred.Poly.svm, "auc")@y.values[[1]]
 ```
 
 ## Comparaison des modèles
